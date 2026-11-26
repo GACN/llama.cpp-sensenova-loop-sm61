@@ -24,26 +24,34 @@ This build exists so Pascal owners can run the model today.
 | CPU | Xeon E5-2698B v3, 32 GB RAM |
 | OS | Windows 10 19044, driver 582.78 |
 | Model | SenseNova-Loop-9B Q4_K_M (5.42 GB) |
-| Context | 4096 → 6336 MiB VRAM used |
+| Context | 4096 → 6336 MiB VRAM · 8192 + MTP → 6856 MiB |
 | Model load | 58 s (cold, from SSD) |
 
-**Speed** — 700-token Chinese explanation, `-ngl 99`, `-c 8192`:
+**Speed** — 600-token Chinese explanation, `-ngl 99`, `-c 8192`:
 
-| Mode | Generation | Prompt (prefill) | GPU util | Power |
-|---|---|---|---|---|
-| plain | 13.7 tok/s | 26–150 tok/s | 85 % | 200–235 W |
-| `--spec-type draft-mtp` | **14.3 tok/s** | same | 85 % | ~205 W |
+| Mode | Generation | Draft acceptance | vs plain |
+|---|---|---|---|
+| plain | 15.8 tok/s | — | — |
+| `--spec-type draft-mtp --spec-draft-n-max 1` | 18.2 tok/s | 75 % | +15 % |
+| **`--spec-type draft-mtp --spec-draft-n-max 2`** | **18.9 tok/s** | 64 % | **+19 %** |
+| `--spec-draft-n-max 3` (value used in the PR example) | 16.5 tok/s | 48 % | +4 % |
+| `--spec-draft-n-max 4` | 14.2 tok/s | 33 % | −10 % |
 
-`llama-bench -p 64 -n 32` on the same card: **pp64 326 tok/s, tg32 16.9 tok/s**.
+**`n-max 2` is the sweet spot on Pascal** — the PR's example value of 3 costs almost all of the gain.
+Prompt processing is 326–503 tok/s depending on batch (`llama-bench -p 64` → 326 tok/s, `-p 512` → 503 tok/s).
 
-MTP speculative decoding gives only ~4 % here (draft acceptance 48 %, mean accepted length 2.4).
-The model is GPU-bound, not CPU-bound — CPU stays at 14 %.
+Nothing else helps: `-fa on/off`, `-b 2048 -ub 512`, `GGML_CUDA_FORCE_MMQ=1` and
+`GGML_CUDA_DISABLE_GRAPHS=1` all land within ±5 % (noise). The model is GPU-bound, not CPU-bound —
+CPU stays at 14 %. Run-to-run variance is roughly ±10 %, so compare configurations in one session.
 
 **Why it is not faster on Pascal.** The 9B checkpoint stores **32 physical trunk layers but evaluates
 56 logical layers per token** (looped transformer, weights shared, per-logical-layer KV/conv state).
 Bytes read per token ≈ 5.42 GB × 56/32 ≈ 9.5 GB, so the bandwidth ceiling on a 480 GB/s card is
-≈ 50 tok/s. We reach 27 % of that: the remaining gap is Q4_K dequantization on Pascal, which has no
-tensor cores, and PR #32588 adds no CUDA-specific kernels for the loop path.
+≈ 50 tok/s. With tuned MTP we reach **18.9 tok/s (38 % of that ceiling)**; the remaining gap is Q4_K
+dequantization on Pascal, which has no tensor cores, and PR #32588 adds no CUDA-specific kernels for
+the loop path. The [`sensenovaloop_awq` branch of LightLLM](https://github.com/ModelTC/LightLLM)
+fuses the mHC ops with Triton kernels and gets much closer to the roofline, but it is Linux + AWQ
+only and does not run on Pascal.
 
 **Quality** — same 8-task ground-truth suite used to evaluate other local models
 (code unit tests, math, Chinese fact, JSON, tool call, needle-in-haystack):
@@ -66,11 +74,11 @@ logic / tool-call JSON respectively).
 llama-server.exe -m SenseNova-Loop-9B-Q4_K_M.gguf -ngl 99 -c 8192 --host 127.0.0.1 --port 8090
 ```
 
-Faster variant with the built-in MTP predictor:
+Faster variant with the built-in MTP predictor — **use `-n-max 2`, not the 3 from the PR example**:
 
 ```
 llama-server.exe -m SenseNova-Loop-9B-Q4_K_M.gguf -ngl 99 -c 8192 ^
-  --spec-type draft-mtp --spec-draft-n-max 3 --no-spec-draft-backend-sampling ^
+  --spec-type draft-mtp --spec-draft-n-max 2 --no-spec-draft-backend-sampling ^
   --host 127.0.0.1 --port 8090
 ```
 
