@@ -34,6 +34,8 @@ This build exists so Pascal owners can run the model today.
 | plain | 13.7 tok/s | 26–150 tok/s | 85 % | 200–235 W |
 | `--spec-type draft-mtp` | **14.3 tok/s** | same | 85 % | ~205 W |
 
+`llama-bench -p 64 -n 32` on the same card: **pp64 326 tok/s, tg32 16.9 tok/s**.
+
 MTP speculative decoding gives only ~4 % here (draft acceptance 48 %, mean accepted length 2.4).
 The model is GPU-bound, not CPU-bound — CPU stays at 14 %.
 
@@ -48,11 +50,13 @@ tensor cores, and PR #32588 adds no CUDA-specific kernels for the loop path.
 
 | Model | Score | Time |
 |---|---|---|
-| **SenseNova-Loop-9B Q4_K_M** (this build) | **7/8** | 53 s |
-| mimo-v2.6:9b (Ollama, Q4_K_M) | 6/8 | 30 s |
-| ornith-1.5:9b (Ollama) | 5/8 | 75 s |
+| **SenseNova-Loop-9B Q4_K_M** (this build) | **8/8** | 54 s |
+| mimo-v2.6:9b Q4_K_M (Ollama) | 7/8 | 29 s |
+| ornith-1.5:9b (Ollama) | 6/8 | 38 s |
 
-So: roughly 3× slower than a plain 9B, but the strongest local model tested so far.
+So: roughly 3× slower than a plain 9B, but the strongest local model tested so far —
+it was the only one to pass all eight tasks (the others failed long-context retrieval / palindrome
+logic / tool-call JSON respectively).
 
 ---
 
